@@ -1,0 +1,11 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+node_modules/
+dist/
+data/
+*.sqlite3
+*.sqlite3-*
+*.png
+npm-debug.log*
