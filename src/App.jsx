@@ -7,6 +7,7 @@ const nav = [
   { id: "inventory", label: "Inventory", min: "manager" },
   { id: "reports", label: "Reports", min: "manager" },
   { id: "ledger", label: "Ledger", min: "manager" },
+  { id: "refunds", label: "Refunds", min: "manager" },
   { id: "workers", label: "Workers", min: "manager" },
   { id: "data", label: "Data", min: "manager" }
 ];
@@ -152,6 +153,7 @@ export default function App() {
         {view === "inventory" && roleAtLeast(session, "manager") && <Inventory state={state} run={run} />}
         {view === "reports" && roleAtLeast(session, "manager") && <DailyReports reports={state.dailyReports || []} timeZone={state.reportTimeZone} />}
         {view === "ledger" && roleAtLeast(session, "manager") && <Ledger transactions={state.transactions} run={run} />}
+        {view === "refunds" && roleAtLeast(session, "manager") && <Refunds state={state} run={run} />}
         {view === "workers" && roleAtLeast(session, "manager") && <Workers run={run} />}
         {view === "data" && roleAtLeast(session, "manager") && <DataTools run={run} />}
       </main>
@@ -801,6 +803,117 @@ function Ledger({ transactions, run }) {
         {!visibleTransactions.length && <em className="empty-state">No ledger entries found.</em>}
       </div>
     </section>
+  );
+}
+
+function latestRefundsByAccount(transactions) {
+  const map = new Map();
+  for (const txn of transactions) {
+    if (txn.type !== "refund" || txn.undone || !txn.accountId) continue;
+    const existing = map.get(txn.accountId);
+    if (!existing || new Date(txn.date) > new Date(existing.date)) {
+      map.set(txn.accountId, txn);
+    }
+  }
+  return map;
+}
+
+function Refunds({ state, run }) {
+  const [query, setQuery] = useState("");
+  const refunded = latestRefundsByAccount(state.transactions || []);
+  const candidates = state.accounts.filter((account) => account.balance > 0 || refunded.has(account.id));
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = normalizedQuery
+    ? candidates.filter((account) => `${account.name} ${account.note || ""}`.toLowerCase().includes(normalizedQuery))
+    : candidates;
+  const sorted = [...visible].sort((a, b) => {
+    const aDone = a.balance <= 0;
+    const bDone = b.balance <= 0;
+    if (aDone !== bDone) return aDone ? 1 : -1;
+    return b.balance - a.balance;
+  });
+  const outstanding = candidates.filter((account) => account.balance > 0);
+  const outstandingTotal = outstanding.reduce((sum, account) => sum + Number(account.balance || 0), 0);
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>End of season refunds</h2>
+          <p>{outstanding.length} account{outstanding.length === 1 ? "" : "s"} still owed {formatMoney(outstandingTotal)}.</p>
+        </div>
+        <input placeholder="Search accounts" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      <div className="list">
+        {sorted.map((account) => (
+          <RefundRow key={account.id} account={account} refundTxn={refunded.get(account.id)} run={run} />
+        ))}
+        {!sorted.length && <em className="empty-state">No positive balances to refund.</em>}
+      </div>
+    </section>
+  );
+}
+
+const refundMethods = [
+  { value: "cash", label: "Cash" },
+  { value: "check", label: "Check" },
+  { value: "venmo", label: "Venmo" },
+  { value: "zelle", label: "Zelle" },
+  { value: "other", label: "Other" }
+];
+
+function RefundRow({ account, refundTxn, run }) {
+  const [open, setOpen] = useState(false);
+  const [method, setMethod] = useState("cash");
+  const [note, setNote] = useState("");
+  const owesRefund = account.balance > 0;
+
+  useEffect(() => {
+    if (!owesRefund) setOpen(false);
+  }, [owesRefund]);
+
+  async function submit(e) {
+    e.preventDefault();
+    const saved = await run(
+      () => api(`/api/accounts/${account.id}/refund`, { method: "POST", body: JSON.stringify({ method, note }) }),
+      "Refund recorded"
+    );
+    if (saved) {
+      setOpen(false);
+      setNote("");
+    }
+  }
+
+  return (
+    <div className="refund-row">
+      <div className="row-main">
+        <strong>{account.name}</strong>
+        {account.note && <small>{account.note}</small>}
+      </div>
+      <strong>{formatMoney(account.balance)}</strong>
+      {!owesRefund && (
+        <span className="status-pill success">
+          {refundTxn
+            ? `Refunded (${refundTxn.details?.method || "?"}) ${formatDate(refundTxn.date)}`
+            : "$0 balance"}
+        </span>
+      )}
+      {owesRefund && !open && <button onClick={() => setOpen(true)}>Mark refunded</button>}
+      {owesRefund && open && (
+        <form className="refund-form" onSubmit={submit}>
+          <select value={method} onChange={(e) => setMethod(e.target.value)}>
+            {refundMethods.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+          <input placeholder="Note required" value={note} onChange={(e) => setNote(e.target.value)} required />
+          <div className="row-actions">
+            <button type="submit">Confirm</button>
+            <button type="button" className="ghost-control" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 

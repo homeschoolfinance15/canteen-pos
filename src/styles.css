@@ -847,6 +847,40 @@ button.row.selected {
   font-weight: 800;
 }
 
+.status-pill.success {
+  background: var(--success-bg);
+  color: var(--accent-2);
+}
+
+.refund-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfb;
+  padding: 10px 12px;
+}
+
+.refund-row > strong {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.refund-form {
+  display: grid;
+  grid-template-columns: 100px minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.refund-form .row-actions {
+  grid-template-columns: repeat(2, minmax(70px, 1fr));
+}
+
 .reports-panel {
   display: grid;
   gap: 12px;
@@ -1010,13 +1044,16 @@ button.row.selected {
   .table-row,
   .ticket-row,
   .ledger-item,
-  .worker-row {
+  .worker-row,
+  .refund-row,
+  .refund-form {
     grid-template-columns: 1fr;
   }
 
   .ticket-row > strong,
   .ledger-item small,
-  .ledger-item strong {
+  .ledger-item strong,
+  .refund-row > strong {
     text-align: left;
   }
 

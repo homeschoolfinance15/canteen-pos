@@ -51,6 +51,9 @@ Role = Literal["cashier", "manager"]
 ROLE_LEVEL = {"cashier": 1, "manager": 2}
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 REVERSIBLE_TRANSACTION_TYPES = {"purchase", "funds_added", "funds_subtracted", "balance_set"}
+# "refund" is intentionally excluded: it's a permanent end-of-season closeout record, not a
+# live money-flow event to be voided through the same Undo button as purchases/balance edits.
+REFUND_METHODS = {"cash", "check", "venmo", "zelle", "other"}
 
 app = FastAPI(title="Canteen POS")
 
@@ -445,6 +448,11 @@ class FundsIn(BaseModel):
 
 class SetBalanceIn(BaseModel):
     balance: float
+    note: str = Field(min_length=1)
+
+
+class RefundIn(BaseModel):
+    method: str
     note: str = Field(min_length=1)
 
 
@@ -878,6 +886,49 @@ def subtract_funds(account_id: str, data: FundsIn, user: dict[str, Any] = Depend
 @app.post("/api/accounts/{account_id}/balance/set")
 def set_balance(account_id: str, data: SetBalanceIn, user: dict[str, Any] = Depends(manager_user)):
     return balance_txn(account_id, "balance_set", money(data.balance), required_text(data.note, "Reason"), user)
+
+
+@app.post("/api/accounts/{account_id}/refund")
+def refund_account(account_id: str, data: RefundIn, user: dict[str, Any] = Depends(manager_user)):
+    method = data.method.strip().lower()
+    if method not in REFUND_METHODS:
+        raise HTTPException(400, "Invalid refund method")
+    note = required_text(data.note, "Reason")
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,name,balance FROM accounts WHERE id=%s FOR UPDATE", (account_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Account not found")
+            before = money(row[2])
+            if before <= 0:
+                raise HTTPException(400, "Account has no balance to refund")
+            cur.execute(
+                "UPDATE accounts SET balance=0, updated_at=now() WHERE id=%s",
+                (account_id,),
+            )
+            cur.execute(
+                """
+                INSERT INTO transactions
+                  (id,type,account_id,account_name,amount,balance_before,balance_after,note,
+                   actor_user_id,actor_name,actor_role,details_json)
+                VALUES (%s,'refund',%s,%s,%s,%s,0,%s,%s,%s,%s,%s)
+                """,
+                (
+                    uid(),
+                    account_id,
+                    row[1],
+                    -before,
+                    before,
+                    note,
+                    user["id"],
+                    user["name"],
+                    user["role"],
+                    Jsonb({"method": method}),
+                ),
+            )
+        conn.commit()
+    return {"ok": True}
 
 
 @app.post("/api/items")
